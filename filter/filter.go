@@ -106,7 +106,10 @@ Loop:
 // arguments and returned paths are slash-delimited.
 func Find(root string, includePatterns []string, excludePatterns []string) ([]string, error) {
 	root = filepath.FromSlash(root)
-	bases := AppendBaseDirs([]string{}, includePatterns)
+	bases := make([]string, len(includePatterns))
+	for i, v := range includePatterns {
+		bases[i] = BaseDir(v)
+	}
 	ret := []string{}
 	for _, b := range bases {
 		b = filepath.FromSlash(b)
