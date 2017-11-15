@@ -330,18 +330,19 @@ func Watch(
 	}
 	go func() {
 		for {
-			b, err := batch(lullTime, MaxLullWait, statExistenceChecker{}, evtch).Filter(
-				root, includes, excludes,
-			)
-			if err != nil {
-				Logger.Shout("Error fetching batch: %s", err)
-			}
+			b := batch(lullTime, MaxLullWait, statExistenceChecker{}, evtch)
 			if !b.Empty() {
-				ret, err := b.normPaths(root)
+				b, err := b.normPaths(root)
 				if err != nil {
 					Logger.Shout("Error normalising paths: %s", err)
 				}
-				ch <- ret
+				b, err = b.Filter(root, includes, excludes)
+				if err != nil {
+					Logger.Shout("Error fetching batch: %s", err)
+				}
+				if !b.Empty() {
+					ch <- b
+				}
 			}
 		}
 	}()
