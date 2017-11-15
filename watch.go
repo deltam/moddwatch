@@ -45,7 +45,7 @@ func isUnder(parent string, child string) bool {
 // is slash-delimited.
 func normPath(bases []string, abspath string) (string, error) {
 	for _, base := range bases {
-		base = filter.BaseDir(base)
+		base, _ = filter.SplitPattern(base)
 		absbase, err := filepath.Abs(base)
 		if isUnder(absbase, abspath) {
 			if err != nil {
@@ -134,16 +134,16 @@ func (mod Mod) Empty() bool {
 }
 
 // Filter applies a filter, returning a new Mod structure
-func (mod *Mod) Filter(includes []string, excludes []string) (*Mod, error) {
-	changed, err := filter.Files(mod.Changed, includes, excludes)
+func (mod Mod) Filter(root string, includes []string, excludes []string) (*Mod, error) {
+	changed, err := filter.Files(root, mod.Changed, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
-	deleted, err := filter.Files(mod.Deleted, includes, excludes)
+	deleted, err := filter.Files(root, mod.Deleted, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
-	added, err := filter.Files(mod.Added, includes, excludes)
+	added, err := filter.Files(root, mod.Added, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +182,8 @@ func _keys(m map[string]bool) []string {
 
 type fset map[string]bool
 
-func mkmod(exists existenceChecker, added fset, removed fset, changed fset, renamed fset) *Mod {
-	ret := &Mod{}
+func mkmod(exists existenceChecker, added fset, removed fset, changed fset, renamed fset) Mod {
+	ret := Mod{}
 	for k := range renamed {
 		// If a file is moved from A to B, we'll get separate rename
 		// events for both A and B. The only way to know if it was the
@@ -241,7 +241,7 @@ func mkmod(exists existenceChecker, added fset, removed fset, changed fset, rena
 //
 // In the face of all this, all we can do is layer on a set of heuristics to
 // try to get intuitive results.
-func batch(lullTime time.Duration, maxTime time.Duration, exists existenceChecker, ch chan notify.EventInfo) *Mod {
+func batch(lullTime time.Duration, maxTime time.Duration, exists existenceChecker, ch chan notify.EventInfo) Mod {
 	added := make(map[string]bool)
 	removed := make(map[string]bool)
 	changed := make(map[string]bool)
@@ -285,20 +285,56 @@ func (w *Watcher) Stop() {
 	notify.Stop(w.evtch)
 }
 
-// Watch watches a set of paths. Mod structs representing a changeset are sent
-// on the channel ch.
+// Given a set of include patterns relative to a root, which directories do we
+// need to monitor for changes?
+func baseDirs(root string, includePatterns []string) []string {
+	root = filepath.FromSlash(root)
+	bases := make([]string, len(includePatterns))
+	for i, v := range includePatterns {
+		rawbdir, trailer := filter.SplitPattern(v)
+		bdir := filepath.Join(root, filepath.FromSlash(rawbdir))
+		if stat, err := os.Lstat(bdir); err != nil {
+			continue
+		} else {
+			// A symlink, so we rebase the include patterns and the base directory
+			if stat.Mode()&os.ModeSymlink != 0 {
+				lnk, err := os.Readlink(bdir)
+				if err != nil {
+					continue
+				}
+				if filepath.IsAbs(lnk) {
+					bdir = lnk
+				} else {
+					bdir = filepath.Join(bdir, lnk)
+				}
+				includePatterns[i] = bdir + "/" + trailer
+			}
+		}
+		bases[i] = bdir
+	}
+	return bases
+}
+
+// Watch watches a set of include and exclude patterns, relative to a given
+// root. Mod structs representing a changeset are sent on the channel ch.
 //
 // Watch applies heuristics to cope with transient files and unreliable event
 // notifications. Modifications are batched up until there is a a lull in the
-// stream of changes of duration lullTime. This lets us represent processes
-// that progressively affect multiple files, like rendering, as a single
-// changeset.
+// stream of changes of duration lullTime. This lets us represent processes that
+// progressively affect multiple files, like rendering, as a single changeset.
 //
 // All paths emitted are slash-delimited.
-func Watch(paths []string, lullTime time.Duration, ch chan *Mod) (*Watcher, error) {
+func Watch(
+	root string,
+	includes []string,
+	excludes []string,
+	lullTime time.Duration,
+	ch chan *Mod,
+) (*Watcher, error) {
 	evtch := make(chan notify.EventInfo, 4096)
+	paths := baseDirs(root, includes)
 	for _, p := range paths {
-		err := notify.Watch(p, evtch, notify.All)
+		err := notify.Watch(filepath.Join(p, "..."), evtch, notify.All)
 		if err != nil {
 			notify.Stop(evtch)
 			return nil, err
@@ -306,8 +342,13 @@ func Watch(paths []string, lullTime time.Duration, ch chan *Mod) (*Watcher, erro
 	}
 	go func() {
 		for {
-			b := batch(lullTime, MaxLullWait, statExistenceChecker{}, evtch)
-			if b != nil && !b.Empty() {
+			b, err := batch(lullTime, MaxLullWait, statExistenceChecker{}, evtch).Filter(
+				root, includes, excludes,
+			)
+			if err != nil {
+				Logger.Shout("Error fetching batch: %s", err)
+			}
+			if !b.Empty() {
 				ret, err := b.normPaths(paths)
 				if err != nil {
 					Logger.Shout("Error normalising paths: %s", err)
@@ -317,4 +358,40 @@ func Watch(paths []string, lullTime time.Duration, ch chan *Mod) (*Watcher, erro
 		}
 	}()
 	return &Watcher{evtch}, nil
+}
+
+// List all files under the root that match the specified patterns. All
+// arguments and returned paths are slash-delimited.
+func List(root string, includePatterns []string, excludePatterns []string) ([]string, error) {
+	root = filepath.FromSlash(root)
+	bases := baseDirs(root, includePatterns)
+	ret := []string{}
+	for _, b := range bases {
+		err := filepath.Walk(
+			b,
+			func(p string, fi os.FileInfo, err error) error {
+				if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+					return nil
+				}
+				cleanpath, err := filter.File(root, p, includePatterns, excludePatterns)
+				if err != nil {
+					return nil
+				}
+				if fi.IsDir() {
+					m, err := filter.MatchAny(p, excludePatterns)
+					// We skip the dir only if it's explicitly excluded
+					if err != nil && !m {
+						return filepath.SkipDir
+					}
+				} else if cleanpath != "" {
+					ret = append(ret, cleanpath)
+				}
+				return nil
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ret, nil
 }
