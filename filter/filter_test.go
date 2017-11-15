@@ -61,7 +61,7 @@ var filterFilesTests = []struct {
 func TestFilterFiles(t *testing.T) {
 	for i, tt := range filterFilesTests {
 		t.Run(fmt.Sprintf("%.2d", i), func(t *testing.T) {
-			result, err := Files(".", tt.files, tt.includes, tt.excludes)
+			result, err := Files(tt.files, tt.includes, tt.excludes)
 			if !tt.err && err != nil {
 				t.Errorf("Test %d: error %s", i, err)
 			}

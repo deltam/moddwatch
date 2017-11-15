@@ -37,36 +37,22 @@ func isUnder(parent string, child string) bool {
 	return false
 }
 
-// Notify events have absolute paths. We want to normalize these so that they
-// are relative to the base path. If the matching base is absolute, so is the
-// returned path.
-//
-// bases and abspath are in the OS-native separator format, the returned path
-// is slash-delimited.
-func normPath(bases []string, abspath string) (string, error) {
-	for _, base := range bases {
-		base, _ = filter.SplitPattern(base)
-		absbase, err := filepath.Abs(base)
-		if isUnder(absbase, abspath) {
-			if err != nil {
-				return "", err
-			}
-			relpath, err := filepath.Rel(absbase, abspath)
-			if err != nil {
-				return "", err
-			}
-			return filepath.ToSlash(filepath.Join(base, relpath)), nil
-		}
+func normPaths(root string, abspaths []string) ([]string, error) {
+	aroot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
 	}
-	return filepath.ToSlash(abspath), nil
-}
-
-func normPaths(bases []string, abspaths []string) ([]string, error) {
 	ret := make([]string, len(abspaths))
 	for i, p := range abspaths {
-		norm, err := normPath(bases, p)
+		norm, err := filepath.Abs(p)
 		if err != nil {
 			return nil, err
+		}
+		if isUnder(aroot, norm) {
+			norm, err = filepath.Rel(aroot, norm)
+			if err != nil {
+				return nil, err
+			}
 		}
 		ret[i] = norm
 	}
@@ -135,31 +121,31 @@ func (mod Mod) Empty() bool {
 
 // Filter applies a filter, returning a new Mod structure
 func (mod Mod) Filter(root string, includes []string, excludes []string) (*Mod, error) {
-	changed, err := filter.Files(root, mod.Changed, includes, excludes)
+	changed, err := filter.Files(mod.Changed, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
-	deleted, err := filter.Files(root, mod.Deleted, includes, excludes)
+	deleted, err := filter.Files(mod.Deleted, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
-	added, err := filter.Files(root, mod.Added, includes, excludes)
+	added, err := filter.Files(mod.Added, includes, excludes)
 	if err != nil {
 		return nil, err
 	}
 	return &Mod{Changed: changed, Deleted: deleted, Added: added}, nil
 }
 
-func (mod *Mod) normPaths(bases []string) (*Mod, error) {
-	changed, err := normPaths(bases, mod.Changed)
+func (mod *Mod) normPaths(root string) (*Mod, error) {
+	changed, err := normPaths(root, mod.Changed)
 	if err != nil {
 		return nil, err
 	}
-	deleted, err := normPaths(bases, mod.Deleted)
+	deleted, err := normPaths(root, mod.Deleted)
 	if err != nil {
 		return nil, err
 	}
-	added, err := normPaths(bases, mod.Added)
+	added, err := normPaths(root, mod.Added)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +309,9 @@ func baseDirs(root string, includePatterns []string) []string {
 // stream of changes of duration lullTime. This lets us represent processes that
 // progressively affect multiple files, like rendering, as a single changeset.
 //
-// All paths emitted are slash-delimited.
+// All paths emitted are slash-delimited and normalised. If a path lies under
+// the specified root, it is converted to a path relative to the root, otherwise
+// the returned path is absolute.
 func Watch(
 	root string,
 	includes []string,
@@ -349,7 +337,7 @@ func Watch(
 				Logger.Shout("Error fetching batch: %s", err)
 			}
 			if !b.Empty() {
-				ret, err := b.normPaths(paths)
+				ret, err := b.normPaths(root)
 				if err != nil {
 					Logger.Shout("Error normalising paths: %s", err)
 				}
@@ -360,8 +348,11 @@ func Watch(
 	return &Watcher{evtch}, nil
 }
 
-// List all files under the root that match the specified patterns. All
-// arguments and returned paths are slash-delimited.
+// List all files under the root that match the specified patterns.
+//
+// All paths returned are slash-delimited and normalised. If a path lies under
+// the specified root, it is converted to a path relative to the root, otherwise
+// the returned path is absolute.
 func List(root string, includePatterns []string, excludePatterns []string) ([]string, error) {
 	root = filepath.FromSlash(root)
 	bases := baseDirs(root, includePatterns)
@@ -373,7 +364,7 @@ func List(root string, includePatterns []string, excludePatterns []string) ([]st
 				if err != nil || fi.Mode()&os.ModeSymlink != 0 {
 					return nil
 				}
-				cleanpath, err := filter.File(root, p, includePatterns, excludePatterns)
+				cleanpath, err := filter.File(p, includePatterns, excludePatterns)
 				if err != nil {
 					return nil
 				}
@@ -393,5 +384,5 @@ func List(root string, includePatterns []string, excludePatterns []string) ([]st
 			return nil, err
 		}
 	}
-	return ret, nil
+	return normPaths(root, ret)
 }

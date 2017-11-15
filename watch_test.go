@@ -158,26 +158,6 @@ func abs(path string) string {
 	return filepath.ToSlash(filepath.Join(wd, path))
 }
 
-var normPathTests = []struct {
-	base     string
-	abspath  string
-	expected string
-}{
-	{"./tmp", abs("./tmp/bar"), "tmp/bar"},
-	{abs("./tmp"), abs("./tmp/bar"), abs("tmp/bar")},
-	{"tmp", abs("tmp/bar"), "tmp/bar"},
-}
-
-func TestNormPath(t *testing.T) {
-	for i, tst := range normPathTests {
-		expected := tst.expected
-		ret, err := normPath([]string{tst.base}, tst.abspath)
-		if err != nil || ret != expected {
-			t.Errorf("Test %d: expected %#v, got %#v", i, expected, ret)
-		}
-	}
-}
-
 var isUnderTests = []struct {
 	parent   string
 	child    string
@@ -218,7 +198,7 @@ func TestMod(t *testing.T) {
 		Deleted: []string{abs("rm")},
 		Changed: []string{abs("change")},
 	}
-	if _, err := m.normPaths([]string{"/"}); err != nil {
+	if _, err := m.normPaths("."); err != nil {
 		t.Error(err)
 	}
 }

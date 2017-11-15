@@ -23,20 +23,11 @@ func MatchAny(path string, patterns []string) (bool, error) {
 // File determines if a file should be included. Returns a cleaned path relative
 // to the root, or the empty string if the file should be skipped.
 func File(
-	root string,
 	path string,
 	includePatterns []string,
 	excludePatterns []string,
 ) (string, error) {
 	cleanpath := path
-	if !filepath.IsAbs(path) {
-		var err error
-		cleanpath, err = filepath.Rel(root, path)
-		if err != nil {
-			return "", err
-		}
-		cleanpath = filepath.ToSlash(cleanpath)
-	}
 	if excluded, err := MatchAny(cleanpath, excludePatterns); err != nil {
 		return "", err
 	} else if excluded {
@@ -52,14 +43,13 @@ func File(
 
 // Files filters an array of files using filter.File.
 func Files(
-	root string,
 	files []string,
 	includePatterns []string,
 	excludePatterns []string,
 ) ([]string, error) {
 	ret := []string{}
 	for _, file := range files {
-		path, err := File(root, file, includePatterns, excludePatterns)
+		path, err := File(file, includePatterns, excludePatterns)
 		if err != nil {
 			continue
 		}
