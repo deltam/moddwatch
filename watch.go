@@ -277,8 +277,10 @@ func baseDirs(root string, includePatterns []string) []string {
 	root = filepath.FromSlash(root)
 	bases := make([]string, len(includePatterns))
 	for i, v := range includePatterns {
-		rawbdir, trailer := filter.SplitPattern(v)
-		bdir := filepath.Join(root, filepath.FromSlash(rawbdir))
+		bdir, trailer := filter.SplitPattern(v)
+		if !filepath.IsAbs(bdir) {
+			bdir = filepath.Join(root, filepath.FromSlash(bdir))
+		}
 		if stat, err := os.Lstat(bdir); err != nil {
 			continue
 		} else {
