@@ -203,7 +203,7 @@ func TestMod(t *testing.T) {
 	}
 }
 
-func testListWindows(t *testing.T) {
+func testListBasic(t *testing.T) {
 	var findTests = []struct {
 		include  []string
 		exclude  []string
@@ -226,12 +226,12 @@ func testListWindows(t *testing.T) {
 		},
 		{
 			[]string{"**"},
-			[]string{"a"},
+			[]string{"a/**"},
 			[]string{"b/a.test1", "b/b.test2", "x", "x.test1"},
 		},
 		{
 			[]string{"**"},
-			[]string{"a/"},
+			[]string{"a/*"},
 			[]string{"b/a.test1", "b/b.test2", "x", "x.test1"},
 		},
 		{
@@ -422,11 +422,8 @@ func testList(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// Windows doesn't (practically) support symlinks. Run a simplified test
-		// suite for it.
-		testListWindows(t)
-	} else {
+	testListBasic(t)
+	if runtime.GOOS != "windows" {
 		testList(t)
 	}
 }
