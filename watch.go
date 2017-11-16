@@ -9,22 +9,12 @@ import (
 	"time"
 
 	"github.com/cortesi/moddwatch/filter"
-	"github.com/cortesi/termlog"
 	"github.com/rjeczalik/notify"
 )
 
 // MaxLullWait is the maximum time to wait for a lull. This only kicks in if
 // we've had a constant stream of modifications blocking us.
 const MaxLullWait = time.Second * 8
-
-// Logger receives events as "debug", and is silenced by default
-var Logger = defaultLogger()
-
-func defaultLogger() termlog.Logger {
-	l := termlog.NewLog()
-	l.Quiet()
-	return l
-}
 
 // isUnder takes two absolute paths, and returns true if child is under parent.
 func isUnder(parent string, child string) bool {
@@ -238,7 +228,6 @@ func batch(lullTime time.Duration, maxTime time.Duration, exists existenceChecke
 		select {
 		case evt := <-ch:
 			hadLullMod = true
-			Logger.SayAs("debug", "%s", evt)
 			switch evt.Event() {
 			case notify.Create:
 				added[evt.Path()] = true
@@ -303,8 +292,8 @@ func baseDirs(root string, includePatterns []string) []string {
 	return bases
 }
 
-// Watch watches a set of include and exclude patterns, relative to a given
-// root. Mod structs representing a changeset are sent on the channel ch.
+// Watch watches a set of include and exclude patterns relative to a given root.
+// Mod structs representing discrete changesets are sent on the channel ch.
 //
 // Watch applies heuristics to cope with transient files and unreliable event
 // notifications. Modifications are batched up until there is a a lull in the
@@ -314,6 +303,22 @@ func baseDirs(root string, includePatterns []string) []string {
 // All paths emitted are slash-delimited and normalised. If a path lies under
 // the specified root, it is converted to a path relative to the root, otherwise
 // the returned path is absolute.
+//
+// Pattern syntax is as follows:
+//   *              any sequence of non-path-separators
+//   **             any sequence of characters, including path separators
+//   ?              any single non-path-separator character
+//   [class]        any single non-path-separator character against a class
+//                  of characters (see below)
+//   {alt1,...}     a sequence of characters if one of the comma-separated
+//                  alternatives matches
+//
+//  Any character with a special meaning can be escaped with a backslash (\).
+//
+// Character classes support the following:
+// 		[abc]		any single character within the set
+// 		[a-z]		any single character in the range
+// 		[^class] 	any single character which does not match the class
 func Watch(
 	root string,
 	includes []string,
@@ -336,11 +341,13 @@ func Watch(
 			if !b.Empty() {
 				b, err := b.normPaths(root)
 				if err != nil {
-					Logger.Shout("Error normalising paths: %s", err)
+					// FIXME: Do something more decisive
+					continue
 				}
 				b, err = b.Filter(root, includes, excludes)
 				if err != nil {
-					Logger.Shout("Error fetching batch: %s", err)
+					// FIXME: Do something more decisive
+					continue
 				}
 				if !b.Empty() {
 					ch <- b
@@ -351,11 +358,15 @@ func Watch(
 	return &Watcher{evtch}, nil
 }
 
-// List all files under the root that match the specified patterns.
+// List all files under the root that match the specified patterns. The file
+// list returned is a catalogue of all files currently on disk that could occur
+// in a Mod structure for a corresponding watch.
 //
 // All paths returned are slash-delimited and normalised. If a path lies under
 // the specified root, it is converted to a path relative to the root, otherwise
 // the returned path is absolute.
+//
+// The pattern syntax is the same as Watch.
 func List(root string, includePatterns []string, excludePatterns []string) ([]string, error) {
 	root = filepath.FromSlash(root)
 	bases := baseDirs(root, includePatterns)

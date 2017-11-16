@@ -1,18 +1,18 @@
 package filter
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar"
 )
 
+// MatchAny checks whether the given path matches any of the specified patterns.
 func MatchAny(path string, patterns []string) (bool, error) {
 	for _, pattern := range patterns {
 		match, err := doublestar.Match(pattern, filepath.ToSlash(path))
 		if err != nil {
-			return false, fmt.Errorf("Error matching pattern '%s': %s", pattern, err)
+			return false, err
 		} else if match {
 			return true, nil
 		}
@@ -20,23 +20,22 @@ func MatchAny(path string, patterns []string) (bool, error) {
 	return false, nil
 }
 
-// File determines if a file should be included. Returns a cleaned path relative
-// to the root, or the empty string if the file should be skipped.
+// File determines if a path matches a set of include and exclude patterns. At
+// least one include pattern and no exclude patterns must match.
 func File(
 	path string,
 	includePatterns []string,
 	excludePatterns []string,
 ) (string, error) {
-	cleanpath := path
-	if excluded, err := MatchAny(cleanpath, excludePatterns); err != nil {
+	if excluded, err := MatchAny(path, excludePatterns); err != nil {
 		return "", err
 	} else if excluded {
 		return "", nil
 	}
-	if included, err := MatchAny(cleanpath, includePatterns); err != nil {
+	if included, err := MatchAny(path, includePatterns); err != nil {
 		return "", err
 	} else if included {
-		return cleanpath, nil
+		return path, nil
 	}
 	return "", nil
 }
@@ -50,12 +49,10 @@ func Files(
 	ret := []string{}
 	for _, file := range files {
 		path, err := File(file, includePatterns, excludePatterns)
-		if err != nil {
+		if err != nil || path == "" {
 			continue
 		}
-		if path != "" {
-			ret = append(ret, path)
-		}
+		ret = append(ret, path)
 	}
 	return ret, nil
 }
